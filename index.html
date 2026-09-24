@@ -48,7 +48,7 @@ function csvParse(t){const rows=[];let row=[],f='',q=false;for(let i=0;i<t.lengt
 const $=s=>document.querySelector(s),uid=()=>Math.random().toString(36).slice(2,10);
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 /* ---- Supabase config: paste your project URL and anon (public) key. Leave empty for local-only mode. ---- */
-const SUPABASE_URL='https://xttgrblngxsbuvhcgsnh.supabase.co/rest/v1/',SUPABASE_KEY='sb_publishable_JV3AlvnOnhL_Pe8ZQLugJA_xpAOvjS1';
+const SUPABASE_URL='https://xttgrblngxsbuvhcgsnh.supabase.co',SUPABASE_KEY='sb_publishable_JV3AlvnOnhL_Pe8ZQLugJA_xpAOvjS1';
 const sb=SUPABASE_URL&&window.supabase?supabase.createClient(SUPABASE_URL,SUPABASE_KEY):null;
 let db={decks:[]},user=null,legacy=[],sync='',tm,sent={};
 try{db=JSON.parse(localStorage.getItem('deckhand')||'')||db}catch(e){}
