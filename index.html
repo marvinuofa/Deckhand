@@ -1,0 +1,236 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>Deckhand: bulk study decks</title>
+<link href="https://fonts.googleapis.com/css2?family=Atkinson+Hyperlegible:wght@400;700&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f4f6f3;--card:#fff;--ink:#1b2430;--mut:#5f6b7a;--line:#d9dfdb;--acc:#0f766e;--fg:#fff;--bad:#b42318;--badbg:#fdeceb;--ok:#12734a;--okbg:#e4f4ea;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#12181b;--card:#1a2226;--ink:#e6ecef;--mut:#95a3ad;--line:#2c383e;--acc:#3fbfb2;--fg:#06201d;--bad:#ff8a80;--badbg:#3a1f1d;--ok:#6fdc9f;--okbg:#17301f}}
+:root[data-theme="dark"]{--bg:#12181b;--card:#1a2226;--ink:#e6ecef;--mut:#95a3ad;--line:#2c383e;--acc:#3fbfb2;--fg:#06201d;--bad:#ff8a80;--badbg:#3a1f1d;--ok:#6fdc9f;--okbg:#17301f}
+html,body{height:auto}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 "Atkinson Hyperlegible",system-ui,sans-serif}
+#app{max-width:980px;margin:0 auto;padding:16px}
+h1{font-size:1.8rem;margin:.3em 0}h2{font-size:1.2rem;margin:1.2em 0 .5em}a{color:var(--acc);cursor:pointer}
+.top{display:flex;justify-content:space-between;align-items:center;max-width:980px;margin:0 auto;padding:12px 16px 0}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center;margin:10px 0}.mut{color:var(--mut)}
+button,select,input,textarea{font:inherit;color:var(--ink);background:var(--card);border:1px solid var(--line);border-radius:8px;padding:8px 12px}
+button{cursor:pointer}button:hover{border-color:var(--acc)}button:focus-visible,input:focus-visible,select:focus-visible,textarea:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+button.pri{background:var(--acc);color:var(--fg);border-color:var(--acc);font-weight:700}button.bad{color:var(--bad)}button:disabled{opacity:.6;cursor:default}
+textarea{width:100%;min-height:200px;box-sizing:border-box;font-family:ui-monospace,monospace;font-size:.9rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:12px}
+.card{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin:8px 0}.grid .card{margin:0}
+.wrap{overflow-x:auto}table{width:100%;border-collapse:collapse;background:var(--card)}th,td{border-bottom:1px solid var(--line);padding:6px 8px;text-align:left;vertical-align:top}
+td input{width:100%;box-sizing:border-box}tr.err td{background:var(--badbg)}
+.tag{font-size:.8rem;padding:2px 8px;border-radius:99px;border:1px solid var(--line)}.tag.mastered{background:var(--okbg);color:var(--ok)}.tag.learning{border-color:var(--acc)}
+.bar{height:8px;background:var(--line);border-radius:4px;overflow:hidden}.bar i{display:block;height:100%;background:var(--acc)}
+.fc{min-height:180px;display:flex;flex-direction:column;justify-content:center;align-items:center;text-align:center;font-size:1.4rem;padding:24px}
+.opt{display:block;width:100%;text-align:left;margin:8px 0}.opt b{display:inline-block;width:1.6em}.opt.ok{background:var(--okbg);border-color:var(--ok)}.opt.no{background:var(--badbg);border-color:var(--bad)}
+.big{font-size:3rem;font-weight:700}.no{color:var(--bad)}.okc{color:var(--ok)}.stmt{font-size:1.2rem}
+.pill{display:inline-flex;gap:4px;align-items:center;border:1px solid var(--line);border-radius:8px;padding:6px 10px;background:var(--card)}
+</style></head><body>
+<div class="top"><a data-a="home"><b>Deckhand</b></a><span><span id="sync" class="mut"></span> <button data-a="theme">Light / dark</button> <button data-a="signout" id="so" hidden>Sign out</button></span></div><div id="app"></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script>
+/* ---------- Parser: standalone, no DOM access ---------- */
+function rowErr(r){return !r.q?'Missing question':!r.a?(r.ns?'Missing separator':'Missing answer'):''}
+function parseQuestions(input,seps,mode){
+  const out={questions:[],errors:[],rows:[]};seps=seps.filter(Boolean);
+  const lines=String(input).split(/\r?\n/);
+  for(let i=0;i<lines.length;i++){const raw=lines[i];if(!raw.trim())continue;let bi=-1,bl=0;
+    for(const s of seps){const k=mode==='last'?raw.lastIndexOf(s):raw.indexOf(s);if(k<0)continue;
+      if(bi<0||(mode==='last'?k>bi:k<bi)||(k===bi&&s.length>bl)){bi=k;bl=s.length}}
+    out.rows.push(bi<0?{line:i+1,q:raw.trim(),a:'',ns:1}:{line:i+1,q:raw.slice(0,bi).trim(),a:raw.slice(bi+bl).trim()})}
+  for(const r of out.rows){const e=rowErr(r);if(e)out.errors.push({line:r.line,content:r.q+(r.a?' | '+r.a:''),reason:e});else out.questions.push({question:r.q,answer:r.a})}
+  return out}
+function csvParse(t){const rows=[];let row=[],f='',q=false;for(let i=0;i<t.length;i++){const c=t[i];
+  if(q){if(c=='"'){if(t[i+1]=='"'){f+='"';i++}else q=false}else f+=c}
+  else if(c=='"')q=true;else if(c==','){row.push(f);f=''}
+  else if(c=='\n'||c=='\r'){if(c=='\r'&&t[i+1]=='\n')i++;row.push(f);rows.push(row);row=[];f=''}else f+=c}
+  if(f||row.length){row.push(f);rows.push(row)}return rows}
+
+/* ---------- State ---------- */
+const $=s=>document.querySelector(s),uid=()=>Math.random().toString(36).slice(2,10);
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+/* ---- Supabase config: paste your project URL and anon (public) key. Leave empty for local-only mode. ---- */
+const SUPABASE_URL='https://xttgrblngxsbuvhcgsnh.supabase.co/rest/v1/',SUPABASE_KEY='sb_publishable_JV3AlvnOnhL_Pe8ZQLugJA_xpAOvjS1';
+const sb=SUPABASE_URL&&window.supabase?supabase.createClient(SUPABASE_URL,SUPABASE_KEY):null;
+let db={decks:[]},user=null,legacy=[],sync='',tm,sent={};
+try{db=JSON.parse(localStorage.getItem('deckhand')||'')||db}catch(e){}
+legacy=db.decks.slice();
+const save=()=>{if(!user){try{localStorage.setItem('deckhand',JSON.stringify(db))}catch(e){}return}clearTimeout(tm);sync='Saving...';const el=$('#sync');if(el)el.textContent=user.email+' · '+sync;tm=setTimeout(push,700)};
+async function push(){const dirty=db.decks.filter(d=>JSON.stringify(d)!==sent[d.id]);
+  if(dirty.length){const {error}=await sb.from('decks').upsert(dirty.map(d=>({user_id:user.id,id:d.id,name:d.name,descr:d.desc||'',cards:d.cards,sessions:d.sessions||[],last_studied:d.last||null,updated_at:new Date().toISOString()})),{onConflict:'user_id,id'});
+    if(error)sync='Save failed: '+error.message;else{dirty.forEach(d=>sent[d.id]=JSON.stringify(d));sync='Saved'}}else sync='Saved';
+  const el=$('#sync');if(el)el.textContent=user.email+' · '+sync}
+async function pull(){const {data,error}=await sb.from('decks').select('*').order('updated_at');
+  if(error){sync='Load failed: '+error.message;return}
+  db={decks:data.map(r=>({id:r.id,name:r.name,desc:r.descr,cards:r.cards,sessions:r.sessions,last:r.last_studied,created:Date.parse(r.updated_at)}))};
+  sent={};db.decks.forEach(d=>sent[d.id]=JSON.stringify(d));sync='Saved'}
+async function onUser(u){user=u;if(u){await pull();S.view='dash'}else{db={decks:[]};S.view='auth'}R()}
+async function authGo(up){S.am='Working...';S.amErr=0;R();
+  const {data,error}=await(up?sb.auth.signUp({email:S.em,password:S.pw}):sb.auth.signInWithPassword({email:S.em,password:S.pw}));
+  if(error){S.am=error.message;S.amErr=1}else if(up&&!data.session)S.am='Check your email to confirm your account, then sign in.';else S.am='';
+  if(!(data&&data.session))R()}
+function authV(){return `<h1>Sign in to Deckhand</h1><div class="card" style="max-width:380px"><div class="row"><input data-f="em" type="email" placeholder="Email" autocomplete="email" style="flex:1" value="${esc(S.em||'')}"></div><div class="row"><input data-f="pw" type="password" placeholder="Password (6+ characters)" autocomplete="current-password" style="flex:1" value="${esc(S.pw||'')}"></div><div class="row"><button class="pri" data-a="signin">Sign in</button><button data-a="signup">Create account</button></div><p class="${S.amErr?'no':'mut'}">${esc(S.am||'')}</p></div>`}
+const S={view:'dash',deck:null,sel:new Set(),search:'',filt:'all',sort:'order',edit:null,imp:null,st:null,qs:{mode:'mc',n:10,f:'all',rq:true,ro:true,rep:false,test:false,pun:true},qz:null,confirm:''};
+const cur=()=>db.decks.find(d=>d.id===S.deck),shuf=a=>{a=a.slice();for(let i=a.length-1;i>0;i--){const j=Math.random()*(i+1)|0;[a[i],a[j]]=[a[j],a[i]]}return a};
+const pick=(d,f)=>d.cards.filter(c=>f==='all'||(f==='wrong'?c.w>0:c.st===f));
+const newCard=(q,a)=>({id:uid(),q,a,st:'new',c:0,w:0,t:Date.now()});
+function grade(card,ok){const d=cur();card.last=d.last=Date.now();if(ok){card.c++;card.st=card.c>=3?'mastered':'learning'}else{card.w++;card.c=0;card.st='learning'}}
+const FIL='<option value="all">All cards</option><option value="new">New</option><option value="learning">Learning</option><option value="mastered">Mastered</option><option value="wrong">Cards I got wrong</option>';
+const sel=(v,h)=>h.replace(`value="${v}"`,`value="${v}" selected`);
+
+/* ---------- Views ---------- */
+function dash(){const ds=db.decks,rec=ds.filter(d=>d.last).sort((a,b)=>b.last-a.last).slice(0,3);
+  return (user&&!db.decks.length&&legacy.length?`<div class="card"><b>${legacy.length} decks found on this device.</b> <button class="pri" data-a="uplegacy">Upload them to my account</button></div>`:'')+`<h1>My decks</h1><div class="row"><input data-f="nd" placeholder="New deck name"><button class="pri" data-a="mk">Create deck</button><button data-a="goimp">Import questions</button></div>`+
+  (rec.length?`<p class="mut">Recently studied: ${rec.map(d=>esc(d.name)).join(', ')}</p>`:'')+
+  (ds.length?`<div class="grid">${ds.map(d=>`<div class="card"><b>${esc(d.name)}</b><p class="mut">${d.cards.length} cards</p><button data-a="open" data-id="${d.id}">Open deck</button></div>`).join('')}</div>`:`<p class="mut">No decks yet. Name one above, or import a list and a deck is created for you.</p>`)}
+function listV(d){let cs=d.cards.filter(c=>(S.filt==='all'||c.st===S.filt)&&(!S.search||(c.q+' '+c.a).toLowerCase().includes(S.search.toLowerCase())));
+  if(S.sort==='q')cs=cs.slice().sort((a,b)=>a.q.localeCompare(b.q));else if(S.sort==='st')cs=cs.slice().sort((a,b)=>a.st.localeCompare(b.st));else if(S.sort==='w')cs=cs.slice().sort((a,b)=>b.w-a.w);
+  if(!cs.length)return '<p class="mut">No matching questions.</p>';
+  return `<div class="wrap"><table><tr><th></th><th>Question</th><th>Answer</th><th>Status</th><th>Actions</th></tr>${cs.map(c=>S.edit===c.id?
+   `<tr><td></td><td><input data-f="eq" value="${esc(c.q)}"></td><td><input data-f="ea" value="${esc(c.a)}"></td><td></td><td><button class="pri" data-a="saveed" data-id="${c.id}">Save</button> <button data-a="caned">Cancel</button></td></tr>`:
+   `<tr><td><input type="checkbox" data-f="sel" data-id="${c.id}" ${S.sel.has(c.id)?'checked':''}></td><td>${esc(c.q)}</td><td>${esc(c.a)}</td><td><span class="tag ${c.st}">${c.st}</span></td><td><button data-a="ed" data-id="${c.id}">Edit</button> <button data-a="dupc" data-id="${c.id}">Duplicate</button> <button class="bad" data-a="delc" data-id="${c.id}">Delete</button></td></tr>`).join('')}</table></div>`}
+function deckV(){const d=cur(),c=d.cards,n=s=>c.filter(x=>x.st===s).length;
+  return `<p><a data-a="home">All decks</a></p>`+(S.ren!=null?`<div class="row"><input data-f="ren" value="${esc(S.ren)}"><button class="pri" data-a="saveren">Save name</button></div>`:`<h1>${esc(d.name)}</h1>`)+
+  `<p class="mut">${c.length} cards: ${n('new')} new, ${n('learning')} learning, ${n('mastered')} mastered</p>
+  <div class="row"><button class="pri" data-a="study">Study</button><button class="pri" data-a="setup">Quiz</button><button data-a="goimp">Import into deck</button><button data-a="exp" data-id="txt">Export TXT</button><button data-a="exp" data-id="csv">Export CSV</button><button data-a="exp" data-id="json">Export JSON</button></div>
+  <div class="row"><button data-a="ren">Rename</button><button data-a="dupd">Duplicate deck</button><button class="bad" data-a="deld">${S.confirm==='d'?'Click again to delete deck':'Delete deck'}</button></div>`+
+  (S.exp?`<div class="card"><p class="mut">Copy this text and save it as a file. TXT uses tab between question and answer (import it with the Tab separator).</p><textarea readonly id="ex" style="min-height:120px">${esc(S.exp)}</textarea><div class="row"><button data-a="copy">Copy</button><button data-a="closeexp">Close</button></div></div>`:'')+
+  `<h2>Questions</h2><div class="row"><input data-f="search" placeholder="Search" value="${esc(S.search)}"><select data-f="filt">${sel(S.filt,FIL)}</select><select data-f="sort">${sel(S.sort,'<option value="order">Sort: added</option><option value="q">Sort: question A-Z</option><option value="st">Sort: status</option><option value="w">Sort: most missed</option>')}</select><button data-a="add">Add question</button><button class="bad" data-a="delsel">Delete selected (${S.sel.size})</button></div><div id="list">${listV(d)}</div>`}
+function impV(){const m=S.imp,r=m.rows,seps=[[',','Comma ,'],['?','Question mark ?'],['\t','Tab'],[':','Colon :']];
+  const bad=r?r.filter(x=>rowErr(x)).length:0,ok=r?r.length-bad:0;
+  return `<p><a data-a="${S.deck?'open':'home'}" data-id="${S.deck||''}">Back</a></p><h1>Import questions</h1>
+  <div class="row"><label>Into: <select data-f="idk"><option value="new">New deck</option>${db.decks.map(d=>`<option value="${d.id}" ${m.deck===d.id?'selected':''}>${esc(d.name)}</option>`).join('')}</select></label>${m.deck==='new'?`<input data-f="inm" placeholder="Deck name" value="${esc(m.name)}">`:''}<label>Load file (.txt .csv .json): <input type="file" data-f="file" accept=".txt,.csv,.json,text/plain"></label></div>
+  <div class="row mut">CSV columns: question <input data-f="qc" type="number" min="1" value="${m.qc}" style="width:64px"> answer <input data-f="ac" type="number" min="1" value="${m.ac}" style="width:64px"> (set before loading a CSV)</div>
+  <textarea data-f="txt" placeholder="Paste your questions and answers here...">${esc(m.text)}</textarea>
+  <h2>Separators</h2><div class="row">${seps.map(([v,l])=>`<label class="pill"><input type="checkbox" data-f="sep" data-id="${v==='\t'?'tab':v}" ${m.seps.includes(v)?'checked':''}> ${l}</label>`).join('')}<label class="pill">Custom <input data-f="cus" value="${esc(m.custom)}" style="width:110px"></label>
+  <label class="pill">Split at <select data-f="mode"><option value="first">first separator</option><option value="last" ${m.mode==='last'?'selected':''}>last separator</option></select></label></div>
+  <p class="mut">If several separators are ticked, the earliest one in each line wins. Use "last separator" when questions contain the separator character.</p>
+  <div class="row"><button class="pri" data-a="parse">Preview parsed questions</button></div>`+(m.msg?`<p class="no">${esc(m.msg)}</p>`:'')+
+  (r?`<h2>Preview</h2><p><b>Successfully parsed: ${ok}</b>. Errors: <b class="${bad?'no':''}" id="nerr">${bad}</b>. Fix or delete error rows below; nothing is dropped unless you delete it or choose to skip it.</p>
+  <div class="row"><label class="pill"><input type="checkbox" data-f="onlyerr" ${m.onlyErr?'checked':''}> Show only errors</label><button class="pri" data-a="commit">Import ${ok} questions${bad?` (skip ${bad} with errors)`:''}</button></div>
+  <div class="wrap"><table><tr><th>#</th><th>Question</th><th>Answer</th><th>Status</th><th></th></tr>${r.map((x,i)=>(m.onlyErr&&!rowErr(x))?'':`<tr class="${rowErr(x)?'err':''}" id="r${i}"><td>${x.line}</td><td><input data-f="pq" data-i="${i}" value="${esc(x.q)}"></td><td><input data-f="pa" data-i="${i}" value="${esc(x.a)}"></td><td class="st">${rowErr(x)?'Error: '+rowErr(x):'Valid'}</td><td><button data-a="delr" data-i="${i}">Delete</button></td></tr>`).join('')}</table></div>`:'')}
+function studyV(){const d=cur(),s=S.st;
+  const head=`<p><a data-a="open" data-id="${d.id}">Back to deck</a></p><h1>Study: ${esc(d.name)}</h1><div class="row"><select data-f="sf">${sel(s.f,FIL)}</select><label class="pill"><input type="checkbox" data-f="ss" ${s.shuf?'checked':''}> Shuffle</label></div>`;
+  if(!s.ids.length)return head+'<p class="mut">No cards in this group.</p>';
+  if(s.i>=s.ids.length)return head+`<div class="card"><p>Round complete: ${s.ok} known, ${s.ids.length-s.ok} to review.</p><button class="pri" data-a="restart">Study again</button></div>`;
+  const c=d.cards.find(x=>x.id===s.ids[s.i]);
+  return head+`<p>Card ${s.i+1} / ${s.ids.length}</p><div class="bar"><i style="width:${s.i/s.ids.length*100}%"></i></div><div class="card fc"><div>${esc(c.q)}</div>${s.show?`<hr style="width:60%;border:0;border-top:1px solid var(--line)"><div class="okc">${esc(c.a)}</div>`:''}</div>
+  <div class="row"><button data-a="prev">Previous (←)</button>${s.show?`<button class="pri" data-a="got">I got it (1)</button><button class="bad" data-a="miss">I got it wrong (2)</button>`:`<button class="pri" data-a="flip">Show answer (Space)</button>`}<button data-a="next">Next (→)</button></div>`}
+function setupV(){const q=S.qs;return `<p><a data-a="open" data-id="${S.deck}">Back to deck</a></p><h1>Quiz setup</h1><div class="card">
+  <div class="row"><label>Mode <select data-f="qm">${sel(q.mode,'<option value="mc">Multiple choice</option><option value="w">Written answer</option><option value="tf">True / false</option><option value="mix">Mixed</option>')}</select></label>
+  <label>Questions <input type="number" min="1" data-f="qn" value="${q.n}" style="width:80px"></label><label>Cards <select data-f="qf">${sel(q.f,FIL)}</select></label></div>
+  <div class="row">${[['rq','Random question order'],['ro','Random multiple-choice order'],['rep','Allow repeats'],['test','Test mode (feedback at the end)'],['pun','Ignore punctuation in written answers']].map(([k,l])=>`<label class="pill"><input type="checkbox" data-f="qb" data-id="${k}" ${q[k]?'checked':''}> ${l}</label>`).join('')}</div>
+  ${S.msg?`<p class="no">${esc(S.msg)}</p>`:''}<button class="pri" data-a="startq">Start quiz</button></div>`}
+function quizV(){const z=S.qz,it=z.items[z.i],n=z.items.length;let b='';
+  if(it.type==='mc')b=it.opts.map((o,j)=>`<button class="opt ${z.fb?(o===it.card.a?'ok':o===z.fb.g?'no':''):''}" data-a="opt" data-i="${j}" ${z.fb?'disabled':''}><b>${'ABCD'[j]}</b>${esc(o)}</button>`).join('');
+  else if(it.type==='tf')b=`<p class="stmt">${esc(it.shown)}</p><div class="row"><button data-a="tf" data-id="1" ${z.fb?'disabled':''}>True (T)</button><button data-a="tf" data-id="0" ${z.fb?'disabled':''}>False (F)</button></div>`;
+  else b=`<div class="row"><input id="wa" autocomplete="off" placeholder="Type your answer" style="flex:1" ${z.fb?'disabled value="'+esc(z.fb.g)+'"':''}><button class="pri" data-a="subw" ${z.fb?'disabled':''}>Submit</button></div>`;
+  return `<div class="row"><b>Question ${z.i+1} / ${n}</b><span class="mut">${z.test?'Test mode':`Score: ${z.score} / ${z.log.length}`}</span></div><div class="bar"><i style="width:${z.i/n*100}%"></i></div>
+  <div class="card"><h2 style="margin-top:0">${esc(it.card.q)}</h2>${b}</div>`+(z.fb?`<div class="card ${z.fb.ok?'okc':'no'}"><b>${z.fb.ok?'Correct':'Incorrect'}</b>${z.fb.ok?'':`<p>Correct answer: ${esc(it.card.a)}</p>`}<button class="pri" data-a="nextq">${z.i+1>=n?'See results':'Next (Enter)'}</button></div>`:'')}
+const fmt=x=>x.it.type==='tf'?`${x.it.shown} (you said ${x.g?'True':'False'})`:x.g||'(blank)';
+function resV(){const z=S.qz,n=z.items.length,bad=z.log.filter(x=>!x.ok);
+  return `<h1>Quiz complete</h1><div class="big">${z.score} / ${n}</div><p><b>${Math.round(z.score/n*100)}%</b></p><p>Correct: ${z.score}<br>Incorrect: ${n-z.score}</p><div class="row"><button class="pri" data-a="setup">New quiz</button><button data-a="open" data-id="${S.deck}">Back to deck</button></div><h2>Review of incorrect questions</h2>`+
+  (bad.length?bad.map(x=>`<div class="card"><b>${esc(x.it.card.q)}</b><p class="no">Your answer: ${esc(fmt(x))}</p><p class="okc">Correct answer: ${esc(x.it.card.a)}</p></div>`).join(''):'<p>No mistakes.</p>')}
+function R(){const v={dash,deck:deckV,import:impV,study:studyV,setup:setupV,quiz:quizV,res:resV,auth:authV}[S.view];$('#app').innerHTML=v();$('#so').hidden=!user;$('#sync').textContent=user?user.email+' · '+sync:'';const w=$('#wa');if(w&&!S.qz.fb)w.focus()}
+const go=v=>{S.view=(sb&&!user)?'auth':v;S.msg='';R();scrollTo(0,0)};
+
+/* ---------- Quiz engine ---------- */
+const norm=s=>{s=String(s).toLowerCase().trim().replace(/\s+/g,' ');return S.qz&&S.qz.pun?s.replace(/[^\p{L}\p{N}\s]/gu,'').replace(/\s+/g,' ').trim():s};
+const NUM=/^[\d.,\s%$-]+$/;
+function distract(card,all,n){const sc=x=>Math.abs(x.length-card.a.length)+(NUM.test(x)===NUM.test(card.a)?0:30);
+  const o=[...new Set(all.filter(c=>c.id!==card.id&&c.a.trim().toLowerCase()!==card.a.trim().toLowerCase()).map(c=>c.a))].sort((x,y)=>sc(x)-sc(y));
+  return shuf(o.slice(0,n*3)).slice(0,n)}
+function mkItem(card,type,all,ro){
+  if(type==='mc'){const d=distract(card,all,3);if(d.length){let o=[card.a,...d];o=ro?shuf(o):o.sort((x,y)=>all.findIndex(c=>c.a===x)-all.findIndex(c=>c.a===y));return{card,type,opts:o}}type='w'}
+  if(type==='tf'){const d=distract(card,all,1);if(d.length){const truth=Math.random()<.5;return{card,type,truth,shown:truth?card.a:d[0]}}type='w'}
+  return{card,type:'w'}}
+function startQuiz(){const d=cur(),q=S.qs,pool=pick(d,q.f);
+  if(!pool.length){S.msg='No cards match that group.';return R()}
+  let n=Math.max(1,+q.n||1),base=q.rq?shuf(pool):pool.slice(),cs=[];
+  if(!q.rep)n=Math.min(n,pool.length);
+  for(let i=0;i<n;i++){if(i&&i%base.length===0&&q.rq)base=shuf(pool);cs.push(base[i%base.length])}
+  const types=['mc','w','tf'];
+  S.qz={items:cs.map(c=>mkItem(c,q.mode==='mix'?types[Math.random()*3|0]:q.mode,d.cards,q.ro)),i:0,score:0,log:[],fb:null,test:q.test,pun:q.pun};go('quiz')}
+function answer(g){const z=S.qz,it=z.items[z.i];if(z.fb)return;
+  const ok=it.type==='mc'?g===it.card.a:it.type==='tf'?g===it.truth:norm(g)!==''&&norm(g)===norm(it.card.a);
+  z.log.push({it,g,ok});if(ok)z.score++;grade(it.card,ok);save();z.test?nextq():(z.fb={ok,g},R())}
+function nextq(){const z=S.qz;z.i++;z.fb=null;if(z.i>=z.items.length){const d=cur();(d.sessions=d.sessions||[]).push({score:z.score,total:z.items.length,at:Date.now()});save();go('res')}else R()}
+
+/* ---------- Study ---------- */
+function buildStudy(f,sh){const d=cur();S.st={f,shuf:sh,ids:(sh?shuf:x=>x)(pick(d,f)).map(c=>c.id),i:0,show:false,ok:0}}
+function mark(ok){const s=S.st,c=cur().cards.find(x=>x.id===s.ids[s.i]);if(!c||!s.show)return;grade(c,ok);if(ok)s.ok++;save();s.i++;s.show=false;R()}
+
+/* ---------- Import / export ---------- */
+function loadFile(file){const rd=new FileReader(),m=S.imp;rd.onload=()=>{const t=String(rd.result),n=file.name.toLowerCase();m.msg='';
+  if(n.endsWith('.json')){try{let x=JSON.parse(t);x=Array.isArray(x)?x:(x.questions||x.cards||[]);m.rows=x.map((y,i)=>({line:i+1,q:String(y.question??y.q??'').trim(),a:String(y.answer??y.a??'').trim()}))}catch(e){m.msg='Could not read JSON: '+e.message}}
+  else if(n.endsWith('.csv')){const qc=(+m.qc||1)-1,ac=(+m.ac||2)-1;let rs=csvParse(t).filter(r=>r.join('').trim());if(rs[0]&&/^question$/i.test((rs[0][qc]||'').trim()))rs=rs.slice(1);m.rows=rs.map((r,i)=>({line:i+1,q:(r[qc]||'').trim(),a:(r[ac]||'').trim()}))}
+  else{m.text=t;m.rows=null}R()};rd.readAsText(file)}
+function exportDeck(f){const c=cur().cards,q=s=>'"'+s.replace(/"/g,'""')+'"';
+  S.exp=f==='json'?JSON.stringify({name:cur().name,questions:c.map(x=>({question:x.q,answer:x.a}))},null,2):f==='csv'?'question,answer\n'+c.map(x=>q(x.q)+','+q(x.a)).join('\n'):c.map(x=>x.q.replace(/\t/g,' ')+'\t'+x.a.replace(/\t/g,' ')).join('\n');R()}
+function commit(){const m=S.imp,good=m.rows.filter(x=>!rowErr(x));if(!good.length){m.msg='Nothing valid to import yet.';return R()}
+  let d=db.decks.find(x=>x.id===m.deck);if(!d){d={id:uid(),name:m.name.trim()||'Imported deck',desc:'',cards:[],created:Date.now()};db.decks.push(d)}
+  d.cards.push(...good.map(x=>newCard(x.q,x.a)));save();S.deck=d.id;S.imp=null;S.sel=new Set();go('deck')}
+function openImport(){S.imp={text:'',seps:[','],custom:'',mode:'first',rows:null,deck:S.deck||'new',name:'',qc:1,ac:2,onlyErr:false,msg:''};go('import')}
+
+/* ---------- Events ---------- */
+document.addEventListener('click',e=>{const el=e.target.closest('[data-a]');if(!el)return;const a=el.dataset.a,id=el.dataset.id,i=+el.dataset.i,d=S.deck?cur():null;
+ switch(a){
+  case'theme':{const r=document.documentElement,dark=getComputedStyle(r).getPropertyValue('--bg').trim()==='#12181b';r.dataset.theme=dark?'light':'dark';break}
+  case'home':S.deck=null;S.exp='';return go('dash');
+  case'signin':authGo(false);return;case'signup':authGo(true);return;case'signout':sb.auth.signOut();return;
+  case'uplegacy':db.decks=legacy;legacy=[];save();return R();
+  case'mk':{const n=(S.nd||'').trim();if(!n)return;db.decks.push({id:uid(),name:n,desc:'',cards:[],created:Date.now()});S.nd='';save();return R()}
+  case'open':S.deck=id;S.exp='';S.confirm='';S.ren=null;S.sel=new Set();return go('deck');
+  case'goimp':return openImport();
+  case'ren':S.ren=d.name;return R();
+  case'saveren':if(S.ren.trim())d.name=S.ren.trim();S.ren=null;save();return R();
+  case'dupd':{const c=JSON.parse(JSON.stringify(d));c.id=uid();c.name=d.name+' (copy)';c.cards.forEach(x=>{x.id=uid();x.st='new';x.c=x.w=0});db.decks.push(c);save();return go('dash')}
+  case'deld':if(S.confirm!=='d'){S.confirm='d';return R()}db.decks=db.decks.filter(x=>x!==d);if(user)sb.from('decks').delete().eq('id',d.id).then(()=>{});S.deck=null;S.confirm='';save();return go('dash');
+  case'exp':return exportDeck(id);
+  case'copy':{const t=$('#ex');t.select();try{navigator.clipboard.writeText(t.value)}catch(x){document.execCommand('copy')}return}
+  case'closeexp':S.exp='';return R();
+  case'add':{const c=newCard('','');d.cards.unshift(c);S.edit=c.id;return R()}
+  case'ed':S.edit=id;return R();
+  case'caned':{const c=d.cards.find(x=>x.id===S.edit);if(c&&!c.q&&!c.a)d.cards=d.cards.filter(x=>x!==c);S.edit=null;return R()}
+  case'saveed':{const c=d.cards.find(x=>x.id===id),q=$('[data-f=eq]').value.trim(),an=$('[data-f=ea]').value.trim();if(!q||!an)return;c.q=q;c.a=an;S.edit=null;save();return R()}
+  case'dupc':{const k=d.cards.findIndex(x=>x.id===id);d.cards.splice(k+1,0,newCard(d.cards[k].q,d.cards[k].a));save();return R()}
+  case'delc':d.cards=d.cards.filter(x=>x.id!==id);S.sel.delete(id);save();return R();
+  case'delsel':d.cards=d.cards.filter(x=>!S.sel.has(x.id));S.sel=new Set();save();return R();
+  case'parse':{const m=S.imp,s=[...m.seps];if(m.custom)s.push(m.custom);m.msg=s.length?'':'Choose at least one separator.';m.rows=s.length?parseQuestions(m.text,s,m.mode).rows:null;if(m.rows&&!m.rows.length)m.msg='No text to parse.';return R()}
+  case'delr':S.imp.rows.splice(i,1);return R();
+  case'commit':return commit();
+  case'study':buildStudy('all',true);return go('study');
+  case'restart':buildStudy(S.st.f,S.st.shuf);return R();
+  case'flip':S.st.show=true;return R();
+  case'next':if(S.st.i<S.st.ids.length){S.st.i++;S.st.show=false;R()}return;
+  case'prev':if(S.st.i>0){S.st.i--;S.st.show=false;R()}return;
+  case'got':return mark(true);case'miss':return mark(false);
+  case'setup':return go('setup');
+  case'startq':return startQuiz();
+  case'opt':return answer(S.qz.items[S.qz.i].opts[i]);
+  case'tf':return answer(id==='1');
+  case'subw':return answer($('#wa').value);
+  case'nextq':return nextq();
+ }});
+document.addEventListener('input',e=>{const el=e.target,f=el.dataset.f;if(!f)return;const m=S.imp,v=el.value,i=+el.dataset.i;
+ switch(f){
+  case'nd':S.nd=v;return;case'em':S.em=v;return;case'pw':S.pw=v;return;case'ren':S.ren=v;return;
+  case'search':S.search=v;$('#list').innerHTML=listV(cur());return;
+  case'filt':S.filt=v;return R();case'sort':S.sort=v;return R();
+  case'sel':el.checked?S.sel.add(el.dataset.id):S.sel.delete(el.dataset.id);$('[data-a=delsel]').textContent=`Delete selected (${S.sel.size})`;return;
+  case'txt':m.text=v;return;case'cus':m.custom=v;return;case'inm':m.name=v;return;case'qc':m.qc=v;return;case'ac':m.ac=v;return;
+  case'idk':m.deck=v;return R();case'mode':m.mode=v;return;
+  case'sep':{const s=el.dataset.id==='tab'?'\t':el.dataset.id;m.seps=el.checked?[...m.seps,s]:m.seps.filter(x=>x!==s);return}
+  case'file':if(el.files[0])loadFile(el.files[0]);return;
+  case'onlyerr':m.onlyErr=el.checked;return R();
+  case'pq':case'pa':{const r=m.rows[i];r[f==='pq'?'q':'a']=v.trim();const e2=rowErr(r),tr=$('#r'+i);tr.className=e2?'err':'';tr.querySelector('.st').textContent=e2?'Error: '+e2:'Valid';$('#nerr').textContent=m.rows.filter(x=>rowErr(x)).length;return}
+  case'sf':buildStudy(v,S.st.shuf);return R();case'ss':buildStudy(S.st.f,el.checked);return R();
+  case'qm':S.qs.mode=v;return;case'qn':S.qs.n=v;return;case'qf':S.qs.f=v;return;case'qb':S.qs[el.dataset.id]=el.checked;return;
+ }});
+document.addEventListener('keydown',e=>{const t=e.target.tagName,k=e.key;if(S.view==='auth'&&k==='Enter'){authGo(false);return}const typing=/INPUT|TEXTAREA|SELECT/.test(t),btn=t==='BUTTON';
+ if(S.view==='study'&&S.st&&!typing){if((k===' '||k==='Enter')&&!btn){e.preventDefault();S.st.show?S.st.show=false:S.st.show=true;R()}else if(k==='ArrowRight')$('[data-a=next]')?.click();else if(k==='ArrowLeft')$('[data-a=prev]')?.click();else if(k==='1')mark(true);else if(k==='2')mark(false)}
+ if(S.view==='quiz'&&S.qz){const z=S.qz,it=z.items[z.i];
+  if(z.fb){if((k==='Enter'||k===' ')&&!btn){e.preventDefault();nextq()}return}
+  if(it.type==='w'){if(k==='Enter'&&t==='INPUT'){e.preventDefault();answer($('#wa').value)}}
+  else if(!typing){if(it.type==='mc'){const j='abcd'.indexOf(k.toLowerCase())>=0?'abcd'.indexOf(k.toLowerCase()):'1234'.indexOf(k);if(j>=0&&j<it.opts.length)answer(it.opts[j])}else{if(/^t$/i.test(k))answer(true);if(/^f$/i.test(k))answer(false)}}}});
+if(sb){S.view='auth';sb.auth.onAuthStateChange((ev,ss)=>{const u=ss&&ss.user||null;if((u&&u.id)!==(user&&user.id))onUser(u)})}
+R();
+</script></body></html>
